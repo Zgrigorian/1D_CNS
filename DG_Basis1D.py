@@ -9,16 +9,18 @@ import Newton
 import copy
 import math
 import time
+import matplotlib.pyplot as plt
 def Steady_State(n,deg):
+    Initial_start=time.time()
     #Define Area
     A=1
     #Define offset for State Vector
     off=(deg+1)*n
-    #Define State Vector
-    u=np.matrix(np.ones(((deg+1)*n,1),dtype=float))*2
-    rho=np.matrix(np.ones(((deg+1)*n,1),dtype=float))*.5
-    T=np.matrix(np.ones(((deg+1)*n,1),dtype=float))*250
-    h=np.matrix(np.ones(((deg+1)*n,1),dtype=float))*250
+    #Define initial conditions
+    u=np.matrix(np.ones(((deg+1)*n,1),dtype=float))*1
+    rho=np.matrix(np.ones(((deg+1)*n,1),dtype=float))*1
+    T=np.matrix(np.ones(((deg+1)*n,1),dtype=float))*300
+    h=np.matrix(np.ones(((deg+1)*n,1),dtype=float))*300
     P=np.matrix(np.ones(((deg+1)*n,1),dtype=float))*101000
     
     u_offset=0*off
@@ -27,18 +29,24 @@ def Steady_State(n,deg):
     T_offset=3*off
     h_offset=4*off
     offset=[u_offset,rho_offset,T_offset,h_offset,P_offset]
-    #state=np.r_[u,rho,T,h,P]
     state=np.r_[u,rho,P,T,h]
     #Define State Vector
     phi=Basis_Func(deg)
     mesh=Linspace(0,1,n+1)
+    #Mass Flow Rate kg/s
     m_flow=1
+    #Molecular weight kg/mol
     MW=.01801528
+    #Ideal gas constant
     R=8.314
+    #Inlet Pressure
     P0=101000
+    #Enthalpy inlet condition
     h_bc=300
-    Cp=1
-    U=1
+    Cp=1.05
+    U=10
+    print("Pre-Calculculating Integrals for Steady State Solver\n")
+    Integration_start=time.time()
     Coeff_3_1=np.matrix(np.zeros((4*deg,(deg+1)**4),dtype=float))
     Coeff_3_0=np.matrix(np.zeros((3*deg+1,(deg+1)**3),dtype=float))
     Coeff_2_1=np.matrix(np.zeros((3*deg,(deg+1)**3),dtype=float))
@@ -52,7 +60,6 @@ def Steady_State(n,deg):
     Ints_1_1=np.matrix(np.zeros(((deg+1)**2,1),dtype=float))
     Ints_1_m1=np.matrix(np.zeros(((deg+1)**3,1),dtype=float))
     T_ints=Enthalpy_T_Int(phi,mesh,n,deg)
-    
     #Pre-Calculate Integration Parameters
     for j in range(0,deg+1):
         for m in range(0,deg+1):
@@ -73,6 +80,8 @@ def Steady_State(n,deg):
                     num3=l+k*(deg+1)+m*(deg+1)**2+j*(deg+1)**3
                     Coeff_3_1[:,num3]=Poly_Mult(phi[:,l],phi[:,k],phi[:,m],Poly_Diff(phi[:,j]))
                     Ints_3_1[num3,0]=Gauss(-1,1,Poly,Coeff_3_1[:,num3]) 
+    Integration_end=time.time()
+    print("Completed Pre-Integration for Steady State Solver in ",Integration_end-Integration_start, "seconds\n")
     def Navier(state,n,deg,phi,mesh,offset,A,m_flow,Coeff_2_1,Ints_1_1,Ints_2_1,Ints_3_1,
                Ints_1_m1,P0,T_ints,R,MW,h_bc,Cp,U):
         Cont=SS_Continuity(state,n,deg,offset,A,m_flow)
@@ -81,13 +90,15 @@ def Steady_State(n,deg):
         Temp=Temperature(state,n,deg,offset,Cp)
         Enth=Enthalpy(state,phi,mesh,n,deg,offset,A,Ints_3_1,Ints_1_m1,Ints_2_0,Ints_2_1,T_ints,h_bc,U)
         return np.r_[Cont,Dense,Press,Temp,Enth]
-    start_time=time.time()
+    
+    Solver_start=time.time()
     
     Sol=Newton.Fast_Newton_Solve(state,Navier,A,n,deg,phi,mesh,offset,A,m_flow,Coeff_2_1,Ints_1_1,Ints_2_1,Ints_3_1,
                                 Ints_1_m1,P0,T_ints,R,MW,h_bc,Cp,U)
-    end_time=time.time()
-    print("Time to run ",(end_time-start_time), "seconds")
-    return Sol,end_time-start_time
+    Solver_end=time.time()
+    print("Newton Solver converged in ",(Solver_end-Solver_start), "seconds\n")
+    print("Total run time is ",(Solver_end-Initial_start), "seconds")
+    return Sol
 
 def Continuity(state,n,deg,basis,mesh,offset,A,BC,Coeff,Ints):
     #This implementation needs to be fixed before I move onto the temporal discretization
@@ -145,11 +156,14 @@ def Momentum_puu(state,n,deg,offset,Ints_3_1,A):
     rho_offset=offset[1]
     output=np.matrix(np.zeros(((deg+1)*n,1),dtype=float))
     Flux=np.matrix(np.zeros(((deg+1)**4,1),dtype=float))
+    #Cycle through all of the elements
     for i in range(0,n):
+        #Pull out the relavent state vectors for the element
         u_vec=state[u_offset+i*(deg+1):u_offset+(i+1)*(deg+1)]
         rho_vec=state[rho_offset+i*(deg+1):rho_offset+(i+1)*(deg+1)]
         if i != 0:
             Flux[0]=-rho_u_u_tensor[-1]
+        #Compute tensor product
         u_u_tensor=np.reshape(np.outer(u_vec,u_vec),((deg+1)**2,1))
         rho_u_u_tensor=np.reshape(np.outer(rho_vec,u_u_tensor),((deg+1)**3,1))
         #Create copies for calculating integration
@@ -158,34 +172,9 @@ def Momentum_puu(state,n,deg,offset,Ints_3_1,A):
         Integral=np.multiply(full_tensor,Ints_3_1)
         Flux[-1]=rho_u_u_tensor[-1]
         Out=Flux-Integral
+        #Compute action of jth basis function
         for j in range(0,deg+1):
             output[i*(deg+1)+j]=np.sum(Out[j*(deg+1)**3:(j+1)*(deg+1)**3])
-#    LHS=np.matrix(np.zeros(((deg+1)*n,1),dtype=float))
-    #Cycle through all elements
-    #Calculate dpu^2/dx
-#    for i in range(0,n):
-#        for j in range(0,deg+1):
-#            for m in range(0,deg+1):
-#                for k in range(0,deg+1):
-#                    for l in range(0,deg+1):
-#                        num=l+k*(deg+1)+m*(deg+1)**2+j*(deg+1)**3
-#                        if j==m and m==k and k==l and l == deg:
-#                            Flux=(state[u_offset+i*(deg+1)+deg]
-#                                 *state[u_offset+i*(deg+1)+deg]
-#                                 *state[rho_offset+i*(deg+1)+deg])
-#                        elif j== m and m==k and k ==l and l==0:
-#                            Flux=-(state[u_offset+i*(deg+1)-1]
-#                                 *state[u_offset+i*(deg+1)-1]
-#                                 *state[rho_offset+i*(deg+1)-1])
-#                        else:
-#                            Flux=0
-#                            
-#                        LHS[j+i*(deg+1)]=LHS[j+i*(deg+1)]+(Flux
-#                                   -state[u_offset+i*(deg+1)+l]
-#                                   *state[u_offset+i*(deg+1)+k]
-#                                   *state[rho_offset+i*(deg+1)+m]
-#                                   *Ints_3_1[num,0])
-#    LHS[0]=0
     output[0]=0
     return output
 #==============================================================================
@@ -193,40 +182,23 @@ def Momentum_dp(state,n,deg,offset,P0,Ints_1_1,A):
     p_offset=offset[4]
     output=np.matrix(np.zeros(((deg+1)*n,1),dtype=float))
     Flux=np.matrix(np.zeros(((deg+1)**2,1),dtype=float))
+    #Cycle through all of the elements
     for i in range(0,n):
         if i != 0:
             Flux[0]=-p_vec[-1]
+        #pull out the relavent state vector
         p_vec=state[p_offset+i*(deg+1):p_offset+(i+1)*(deg+1)]
         #Create copies for calculating integration
         full_tensor=np.tile(p_vec,(deg+1,1))
         #Calculate integration
         Integral=np.multiply(full_tensor,Ints_1_1)
+        #Finish computing the flux
         Flux[-1]=p_vec[-1]
         Out=Flux-Integral
+        #Compute the action of the jth basis function
         for j in range(0,deg+1):
             output[i*(deg+1)+j]=np.sum(Out[j*(deg+1):(j+1)*(deg+1)])
-    #Calculate dp/dx
-#    RHS=np.matrix(np.zeros(((deg+1)*n,1),dtype=float))
-#    for i in range(0,n):
-#        #Cycle through all test functions
-#        for j in range(0,deg+1):
-#            #For summation purposes
-#            for k in range(0,deg+1):
-#                num=k+(deg+1)*j
-#                
-#                #Calculate Flux
-#                if j == k and j == 0:
-#                    Flux=-state[p_offset+i*(deg+1)-1]
-#                elif j==k and j==deg:
-#                    Flux=state[p_offset+i*(deg+1)+deg]
-#                else:
-#                    Flux=0
-#                
-#                #Sum right hand side
-#                RHS[j+i*(deg+1)]=RHS[j+i*(deg+1)]+(Flux
-#                                      -state[p_offset+i*(deg+1)+k]
-#                                      *Ints_1_1[num,0])
-#    RHS[0]=P0-state[p_offset]
+    #Enforce pressure boundary condition
     output[0]=P0-state[p_offset]
     return output
 #==============================================================================
@@ -242,13 +214,15 @@ def Density(state,n,deg,offset,R,MW):
 
 def Temperature(state,n,deg,offset,Cp):
     #Define offsets from offset vector
+    #Computes the Temperature as a function of enthalpy
     T_offset=offset[2]
     h_offset=offset[3]
-    output=state[T_offset:T_offset+n*(deg+1)]-state[h_offset:h_offset+n*(deg+1)]
+    output=Cp*state[T_offset:T_offset+n*(deg+1)]-state[h_offset:h_offset+n*(deg+1)]
     return output
 #==============================================================================
     
 def Enthalpy(state,phi,mesh,n,deg,offset,A,Ints_3_1,Ints_1_m1,Ints_2_0,Ints_2_1,T_ints,h_bc,U):
+    #Computes the 1D Enthalpy equation
     output=(Enthalpy_Term(state,n,deg,offset,A,Ints_3_1,h_bc)
             -Enthalpy_Press(state,n,deg,offset,A,Ints_1_m1)
             -Enthalpy_Heat(state,phi,T_ints,mesh,n,deg,offset,A,Ints_2_0,U))
@@ -256,6 +230,7 @@ def Enthalpy(state,phi,mesh,n,deg,offset,A,Ints_3_1,Ints_1_m1,Ints_2_0,Ints_2_1,
 #==============================================================================
     
 def Enthalpy_Term(state,n,deg,offset,A,Ints_3_1,h_bc):
+    #Computes d(rho*h*u)/dx term in enthalpy equation
     u_offset=offset[0]
     rho_offset=offset[1]
     h_offset=offset[3]
@@ -278,36 +253,12 @@ def Enthalpy_Term(state,n,deg,offset,A,Ints_3_1,h_bc):
         Out=Flux-Integral
         for j in range(0,deg+1):
             output2[i*(deg+1)+j]=np.sum(Out[j*len(rho_u_h_tensor):(j+1)*len(rho_u_h_tensor)])
-            
-#    output=np.matrix(np.zeros(((deg+1)*n,1),dtype=float))
-#    for i in range(0,n):
-#        for j in range(0,deg+1):
-#            for m in range(0,deg+1):
-#                for k in range(0,deg+1):
-#                    for l in range(0,deg+1):
-#                        num=l+k*(deg+1)+m*(deg+1)**2+j*(deg+1)**3
-#                        #Calculate Flux
-#                        if j==m and m==k and k==l and i!=0 and l == 0:
-#                            Flux=-(A*state[rho_offset+i*(deg+1)-1]
-#                                  *state[u_offset+i*(deg+1)-1]
-#                                  *state[h_offset+i*(deg+1)-1])
-#                        elif j==m and m==k and k==l and l == deg:
-#                            Flux=(A*state[rho_offset+i*(deg+1)+deg]
-#                                  *state[u_offset+i*(deg+1)+deg]
-#                                  *state[h_offset+i*(deg+1)+deg])
-#                        else:
-#                            Flux=0
-#                        
-#                        output[j+i*(deg+1)]=output[j+i*(deg+1)]+(Flux-
-#                                             A*state[rho_offset+i*(deg+1)+m]
-#                                             *state[u_offset+i*(deg+1)+k]
-#                                             *state[h_offset+i*(deg+1)+l]
-#                                             *Ints_3_1[num,0])
-#    output[0]=300-state[h_offset]
+    #Enforce enthalpy boundary condition
     output2[0]=h_bc-state[h_offset]
     return output2
 #==============================================================================
 def Enthalpy_Press(state,n,deg,offset,A,Ints_1_m1):
+    #Computes u*dp/dx term in enthalpy equation
     u_offset=offset[0]
     p_offset=offset[4]
 #    output=np.matrix(np.zeros(((deg+1)*n,1),dtype=float))
@@ -333,64 +284,45 @@ def Enthalpy_Press(state,n,deg,offset,A,Ints_1_m1):
         #Calculate the integral for each basis vector j on element i
         for j in range(0,deg+1):
             output2[i*(deg+1)+j]=np.sum(Out2[j*(deg+1)**2:(j+1)*(deg+1)**2])
-#            for m in range(0,deg+1):
-#                for k in range(0,deg+1):
-#                    num=k+(deg+1)*m+j*(deg+1)**2
-#                    #Calculate Flux
-#                    if j == m and k==m and m ==0 and i != 0:
-#                        Flux=-(A*state[p_offset+i*(deg+1)-1]
-#                                *state[u_offset+i*(deg+1)-1])
-#                    elif j==m and k==m and m == deg:
-#                        Flux=(A*state[p_offset+i*(deg+1)+deg]
-#                                *state[u_offset+i*(deg+1)+deg])
-#                    else:
-#                        Flux = 0
-#                    output[j+i*(deg+1)]=output[j+i*(deg+1)]+(Flux-
-#                                           A*state[p_offset+i*(deg+1)+m]
-#                                            *state[u_offset+i*(deg+1)+k]
-#                                            *Ints_1_m1[num,0])
-#    output[0]=0
-    #Set the first element to zero for boundary condition purposes
+    #Set first term to zero for boundary equation
     output2[0]=0
     return output2
 #==============================================================================
     
 def Enthalpy_Heat(state,phi,T_ints,mesh,n,deg,offset,A,Ints_2_0,U):
-    P=2*math.sqrt(A*np.pi)
+    #Calculate the perimiter of the pipe
+    Perim=2*math.sqrt(A*np.pi)
     T_offset=offset[2]
+    #Reshape the surrounding temperature function into a vector
     T_ints2=np.reshape(T_ints,(n*(deg+1),1))
     output2=np.matrix(np.zeros(((deg+1)*n,1),dtype=float))
+    #Cycle through all elements in the mesh
     for i in range(0,n):
+        #Calculate the length of the element (for non-uniform meshes)
         dx=mesh[i+1]-mesh[i]
+        #Pull relavent state variable for the element
         T_vec=state[T_offset+i*(deg+1):T_offset+(i+1)*(deg+1)]
         #Create copies for calculating integration
         full_tensor=np.tile(T_vec,(deg+1,1))
         #Calculate integration
         Integral2=np.multiply(full_tensor,Ints_2_0)
+        #Calculate the action of the j'th basis function
         for j in range(0,deg+1):
             output2[j+i*(deg+1)]=T_ints2[j+i*(deg+1)]-dx/2*np.sum(Integral2[j*(deg+1):(j+1)*(deg+1)])
-#     output=np.matrix(np.zeros(((deg+1)*n,1),dtype=float))
-#    Integral=np.matrix(np.zeros(((deg+1)*n,1),dtype=float))
-#    for i in range(0,n):
-#        dx=mesh[i+1]-mesh[i]
-#        for j in range(0,deg+1):
-#            for m in range(0,deg+1):
-#                num=m+(deg+1)*j
-#                Integral[j+i*(deg+1)]=Integral[j+i*(deg+1)]+(
-#                                      state[T_offset+i*(deg+1)+m]*Ints_2_0[num,0])
-#            output[j+i*(deg+1)]=U*P*(T_ints[i,j]-dx*Integral[j+i*(deg+1)]/2)
-#    output[0]=0
-    output2=output2*U*P
+    #multiply through by U and the perimeter
+    output2=output2*U*Perim
+    #Set the first term to zero for the boundary equation
     output2[0]=0
     return output2
 #==============================================================================
 
 def T_Surr(x):
-    
+    #Defines the surrounding temerature as a function of x
     return 290
 #==============================================================================
     
 def Enthalpy_T_Int(phi,mesh,n,deg):
+    #Integrates the surrounding temperature function along the mesh
     output=np.matrix(np.zeros((n,deg+1),dtype=float))
     def func(z,T_func,phi,a,b):
         return T_func(Ref_2_Real(a,b,z))*Poly(z,phi)
@@ -634,3 +566,27 @@ def Lagrange(x_vec,y_vec,z):
         output=output+l_basis[i]*y_vec[i]
     return output
 #==============================================================================
+def DG_Mesh(mesh,deg):
+    Elements=len(mesh)-1
+    dg_mesh=np.matrix(np.zeros(((deg+1)*Elements,1),dtype=float))
+    for i in range(0,Elements):
+        a=mesh[i]
+        b=mesh[i+1]
+        for j in range(0,deg+1):
+            dg_mesh[j+i*(deg+1)]=mesh[i]+j*(b-a)/deg
+    return dg_mesh
+#==============================================================================
+def DG_Plot(mesh,state):
+    Elements=len(mesh)-1
+    deg=int(len(state)/Elements-1)
+    pts=101
+    phi=Basis_Func(deg)
+    refmesh=Linspace(-1,1,pts)
+    store=np.matrix(np.zeros((101,1),dtype=float))
+    for i in range(0,Elements):
+        func=np.multiply(state[i*(deg+1):(i+1)*(deg+1)].T,phi)
+        Coeff=sum(func.T).T
+        real_mesh=Linspace(mesh[i],mesh[i+1],pts)
+        for j in range(0,pts):
+            store[j]=Poly(refmesh[j],Coeff)
+        plt.plot(real_mesh,store,'C0')
