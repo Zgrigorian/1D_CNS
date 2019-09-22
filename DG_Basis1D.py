@@ -10,11 +10,8 @@ import copy
 import math
 import time
 import matplotlib.pyplot as plt
-def Steady_State(n,deg):
+def Steady_State(n,deg,A,D,mesh,m_flow,MW,R,P0,h_bc,Cp,U,rough,mu,T_ambient):
     Initial_start=time.time()
-    #Define Area
-    A=1
-    #Define offset for State Vector
     off=(deg+1)*n
     #Define initial conditions
     u=np.matrix(np.ones(((deg+1)*n,1),dtype=float))*1
@@ -22,44 +19,37 @@ def Steady_State(n,deg):
     T=np.matrix(np.ones(((deg+1)*n,1),dtype=float))*300
     h=np.matrix(np.ones(((deg+1)*n,1),dtype=float))*300
     P=np.matrix(np.ones(((deg+1)*n,1),dtype=float))*101000
-    
+    f=np.matrix(np.ones(((deg+1)*n,1),dtype=float))*.1
     u_offset=0*off
     rho_offset=1*off
     P_offset=2*off
     T_offset=3*off
     h_offset=4*off
-    offset=[u_offset,rho_offset,T_offset,h_offset,P_offset]
-    state=np.r_[u,rho,P,T,h]
+    f_offset=5*off
+    offset=[u_offset,rho_offset,T_offset,h_offset,P_offset,f_offset]
+    state=np.r_[u,rho,P,T,h,f]
     #Define State Vector
-    phi=Basis_Func(deg)
-    mesh=Linspace(0,1,n+1)
-    #Mass Flow Rate kg/s
-    m_flow=1
-    #Molecular weight kg/mol
-    MW=.01801528
-    #Ideal gas constant
-    R=8.314
-    #Inlet Pressure
-    P0=101000
-    #Enthalpy inlet condition
-    h_bc=300
-    Cp=1.05
-    U=10
+    phi=Basis_Func(deg)   
+    
     print("Pre-Calculculating Integrals for Steady State Solver\n")
     Integration_start=time.time()
+    Coeff_6_0=np.matrix(np.zeros((6*deg+1,(deg+1)**6),dtype=float))
+    Coeff_5_0=np.matrix(np.zeros((5*deg+1,(deg+1)**5),dtype=float))
     Coeff_3_1=np.matrix(np.zeros((4*deg,(deg+1)**4),dtype=float))
     Coeff_3_0=np.matrix(np.zeros((3*deg+1,(deg+1)**3),dtype=float))
     Coeff_2_1=np.matrix(np.zeros((3*deg,(deg+1)**3),dtype=float))
     Coeff_2_0=np.matrix(np.zeros((2*deg+1,(deg+1)**2),dtype=float))
     Coeff_1_1=np.matrix(np.zeros((2*deg,(deg+1)**2),dtype=float))
     Coeff_1_m1=np.matrix(np.zeros((3*deg,(deg+1)**3),dtype=float))
+    Ints_6_0=np.matrix(np.zeros(((deg+1)**6,1),dtype=float))
+    Ints_5_0=np.matrix(np.zeros(((deg+1)**5,1),dtype=float))
     Ints_3_1=np.matrix(np.zeros(((deg+1)**4,1),dtype=float))
     Ints_3_0=np.matrix(np.zeros(((deg+1)**3,1),dtype=float))
     Ints_2_1=np.matrix(np.zeros(((deg+1)**3,1),dtype=float))
     Ints_2_0=np.matrix(np.zeros(((deg+1)**2,1),dtype=float))
     Ints_1_1=np.matrix(np.zeros(((deg+1)**2,1),dtype=float))
     Ints_1_m1=np.matrix(np.zeros(((deg+1)**3,1),dtype=float))
-    T_ints=Enthalpy_T_Int(phi,mesh,n,deg)
+    T_ints=Enthalpy_T_Int(phi,mesh,n,deg,T_ambient)
     #Pre-Calculate Integration Parameters
     for j in range(0,deg+1):
         for m in range(0,deg+1):
@@ -80,21 +70,32 @@ def Steady_State(n,deg):
                     num3=l+k*(deg+1)+m*(deg+1)**2+j*(deg+1)**3
                     Coeff_3_1[:,num3]=Poly_Mult(phi[:,l],phi[:,k],phi[:,m],Poly_Diff(phi[:,j]))
                     Ints_3_1[num3,0]=Gauss(-1,1,Poly,Coeff_3_1[:,num3]) 
+                    for r in range(0,deg+1):
+                        num4=r+l*(deg+1)+k*(deg+1)**2+m*(deg+1)**3+j*(deg+1)**4
+                        Coeff_5_0[:,num4]=Poly_Mult(phi[:,r],phi[:,l],phi[:,k],phi[:,m],phi[:,j])
+                        Ints_5_0[num4,0]=Gauss(-1,1,Poly,Coeff_5_0[:,num4])
+                        for s in range(0,deg+1):
+                            num5=s+r*(deg+1)+l*(deg+1)**2+k*(deg+1)**3+m*(deg+1)**4+j*(deg+1)**5
+                            Coeff_6_0[:,num5]=Poly_Mult(phi[:,s],phi[:,r],phi[:,l],phi[:,k],phi[:,m],phi[:,j])
+                            Ints_6_0[num4,0]=Gauss(-1,1,Poly,Coeff_6_0[:,num4])
+                            
+                        
     Integration_end=time.time()
     print("Completed Pre-Integration for Steady State Solver in ",Integration_end-Integration_start, "seconds\n")
     def Navier(state,n,deg,phi,mesh,offset,A,m_flow,Coeff_2_1,Ints_1_1,Ints_2_1,Ints_3_1,
-               Ints_1_m1,P0,T_ints,R,MW,h_bc,Cp,U):
+               Ints_1_m1,Ints_5_0,Ints_6_0,P0,T_ints,R,MW,h_bc,Cp,U,D,rough,mu):
         Cont=SS_Continuity(state,n,deg,offset,A,m_flow)
         Dense=Density(state,n,deg,offset,R,MW)
-        Press=Momentum(state,n,deg,offset,P0,Ints_1_1,Ints_3_1,A)
+        Press=Momentum(state,n,deg,offset,P0,A,D,Ints_1_1,Ints_3_1,Ints_5_0)
         Temp=Temperature(state,n,deg,offset,Cp)
-        Enth=Enthalpy(state,phi,mesh,n,deg,offset,A,Ints_3_1,Ints_1_m1,Ints_2_0,Ints_2_1,T_ints,h_bc,U)
-        return np.r_[Cont,Dense,Press,Temp,Enth]
+        Enth=Enthalpy(state,phi,mesh,n,deg,offset,A,D,h_bc,U,Ints_3_1,Ints_1_m1,Ints_2_0,Ints_2_1,T_ints,Ints_6_0)
+        Fric=Friction(state,offset,n,deg,D,rough,mu)
+        return np.r_[Cont,Dense,Press,Temp,Enth,Fric]
     
     Solver_start=time.time()
     
     Sol=Newton.Fast_Newton_Solve(state,Navier,A,n,deg,phi,mesh,offset,A,m_flow,Coeff_2_1,Ints_1_1,Ints_2_1,Ints_3_1,
-                                Ints_1_m1,P0,T_ints,R,MW,h_bc,Cp,U)
+                                Ints_1_m1,Ints_5_0,Ints_6_0,P0,T_ints,R,MW,h_bc,Cp,U,D,rough,mu)
     Solver_end=time.time()
     print("Newton Solver converged in ",(Solver_end-Solver_start), "seconds\n")
     print("Total run time is ",(Solver_end-Initial_start), "seconds")
@@ -146,11 +147,13 @@ def SS_Continuity(state,n,deg,offset,A,m_flow):
     return Output
 #==============================================================================
     
-def Momentum(state,n,deg,offset,P0,Ints_1_1,Ints_3_1,A):
+def Momentum(state,n,deg,offset,P0,A,D,Ints_1_1,Ints_3_1,Ints_5_0):
     puu=Momentum_puu(state,n,deg,offset,Ints_3_1,A)
     dpdx=Momentum_dp(state,n,deg,offset,P0,Ints_1_1,A)
-    return dpdx-puu
+    friction=Momentum_Friction(state,n,deg,offset,A,D,Ints_5_0)
+    return dpdx-puu-friction
 #==============================================================================
+    
 def Momentum_puu(state,n,deg,offset,Ints_3_1,A):
     u_offset=offset[0]
     rho_offset=offset[1]
@@ -178,6 +181,7 @@ def Momentum_puu(state,n,deg,offset,Ints_3_1,A):
     output[0]=0
     return output
 #==============================================================================
+    
 def Momentum_dp(state,n,deg,offset,P0,Ints_1_1,A):
     p_offset=offset[4]
     output=np.matrix(np.zeros(((deg+1)*n,1),dtype=float))
@@ -202,6 +206,39 @@ def Momentum_dp(state,n,deg,offset,P0,Ints_1_1,A):
     output[0]=P0-state[p_offset]
     return output
 #==============================================================================
+    
+def Momentum_Friction(state,n,deg,offset,A,D,Ints_5_0):
+    u_offset=offset[0]
+    rho_offset=offset[1]
+    f_offset=offset[5]
+    output=np.matrix(np.zeros(((deg+1)*n,1),dtype=float))
+    #Flux=np.matrix(np.zeros(((deg+1)**5,1),dtype=float))
+    #Cycle through all of the elements
+    for i in range(0,n):
+        #Pull out the relavent state vectors for the element
+        u_vec=state[u_offset+i*(deg+1):u_offset+(i+1)*(deg+1)]
+        rho_vec=state[rho_offset+i*(deg+1):rho_offset+(i+1)*(deg+1)]
+        f_vec=state[f_offset+i*(deg+1):f_offset+(i+1)*(deg+1)]
+#        if i != 0:
+#            Flux[0]=-f_rho_u_u_tensor[-1]
+        #Compute tensor product
+        u_u_tensor=np.reshape(np.outer(u_vec,u_vec),((deg+1)**2,1))
+        rho_u_u_tensor=np.reshape(np.outer(rho_vec,u_u_tensor),((deg+1)**3,1))
+        f_rho_u_u_tensor=np.reshape(np.outer(f_vec,rho_u_u_tensor),((deg+1)**4,1))
+        #Create copies for calculating integration
+        full_tensor=np.tile(f_rho_u_u_tensor,(deg+1,1))
+        #Calculate integration
+        Integral=np.multiply(full_tensor,Ints_5_0)
+#        Flux[-1]=f_rho_u_u_tensor[-1]
+        Out=Integral
+        
+        #Compute action of jth basis function
+        for j in range(0,deg+1):
+            output[i*(deg+1)+j]=A/2/D*np.sum(Out[j*(deg+1)**4:(j+1)*(deg+1)**4])
+    output[0]=0
+    return output
+#==============================================================================
+    
 def Density(state,n,deg,offset,R,MW):
     #Define offsets from offset vector
     rho_offset=offset[1]
@@ -221,11 +258,12 @@ def Temperature(state,n,deg,offset,Cp):
     return output
 #==============================================================================
     
-def Enthalpy(state,phi,mesh,n,deg,offset,A,Ints_3_1,Ints_1_m1,Ints_2_0,Ints_2_1,T_ints,h_bc,U):
+def Enthalpy(state,phi,mesh,n,deg,offset,A,D,h_bc,U,Ints_3_1,Ints_1_m1,Ints_2_0,Ints_2_1,T_ints,Ints_6_0):
     #Computes the 1D Enthalpy equation
     output=(Enthalpy_Term(state,n,deg,offset,A,Ints_3_1,h_bc)
             -Enthalpy_Press(state,n,deg,offset,A,Ints_1_m1)
-            -Enthalpy_Heat(state,phi,T_ints,mesh,n,deg,offset,A,Ints_2_0,U))
+            -Enthalpy_Heat(state,phi,T_ints,mesh,n,deg,offset,A,Ints_2_0,U)
+            +Enthalpy_Friction(state,offset,deg,n,A,D,Ints_6_0))
     return output
 #==============================================================================
     
@@ -315,25 +353,75 @@ def Enthalpy_Heat(state,phi,T_ints,mesh,n,deg,offset,A,Ints_2_0,U):
     output2[0]=0
     return output2
 #==============================================================================
+    
+def Enthalpy_Friction(state,offset,deg,n,A,D,Ints_6_0):
+    u_offset=offset[0]
+    rho_offset=offset[1]
+    f_offset=offset[5]
+    output=np.matrix(np.zeros(((deg+1)*n,1),dtype=float))
+    #Flux=np.matrix(np.zeros(((deg+1)**5,1),dtype=float))
+    #Cycle through all of the elements
+    for i in range(0,n):
+        #Pull out the relavent state vectors for the element
+        u_vec=state[u_offset+i*(deg+1):u_offset+(i+1)*(deg+1)]
+        rho_vec=state[rho_offset+i*(deg+1):rho_offset+(i+1)*(deg+1)]
+        f_vec=state[f_offset+i*(deg+1):f_offset+(i+1)*(deg+1)]
+#        if i != 0:
+#            Flux[0]=-f_rho_u_u_tensor[-1]
+        #Compute tensor product
+        u_u_tensor=np.reshape(np.outer(u_vec,u_vec),((deg+1)**2,1))
+        u_u_u_tensor=np.reshape(np.outer(u_vec,u_u_tensor),((deg+1)**3,1))
+        rho_u_u_u_tensor=np.reshape(np.outer(rho_vec,u_u_u_tensor),((deg+1)**4,1))
+        f_rho_u_u_u_tensor=np.reshape(np.outer(f_vec,rho_u_u_u_tensor),((deg+1)**5,1))
+        #Create copies for calculating integration
+        full_tensor=np.tile(f_rho_u_u_u_tensor,(deg+1,1))
+        #Calculate integration
+        Integral=np.multiply(full_tensor,Ints_6_0)
+#        Flux[-1]=f_rho_u_u_tensor[-1]
+        Out=Integral
+        
+        #Compute action of jth basis function
+        for j in range(0,deg+1):
+            output[i*(deg+1)+j]=A/2/D*np.sum(Out[j*(deg+1)**5:(j+1)*(deg+1)**5])
+    output[0]=0
+    return output
 
-def T_Surr(x):
+def T_Surr(x,T_ambient):
     #Defines the surrounding temerature as a function of x
-    return 290
+    return T_ambient
 #==============================================================================
     
-def Enthalpy_T_Int(phi,mesh,n,deg):
+def Enthalpy_T_Int(phi,mesh,n,deg,T_ambient):
     #Integrates the surrounding temperature function along the mesh
     output=np.matrix(np.zeros((n,deg+1),dtype=float))
-    def func(z,T_func,phi,a,b):
-        return T_func(Ref_2_Real(a,b,z))*Poly(z,phi)
+    def func(z,T_func,phi,a,b,T_ambient):
+        return T_func(Ref_2_Real(a,b,z),T_ambient)*Poly(z,phi)
     for i in range(0,n):
         a=mesh[i]
         b=mesh[i+1]
         for j in range(0,deg+1):
-            output[i,j]=(b-a)/2*Gauss(-1,1,func,T_Surr,phi[:,j],a,b)
+            output[i,j]=(b-a)/2*Gauss(-1,1,func,T_Surr,phi[:,j],a,b,T_ambient)
     return output
 #==============================================================================
-         
+
+def Friction(state,offset,n,deg,D,rough,mu):
+    u_offset=offset[0]
+    rho_offset=offset[1]
+    f_offset=offset[5]
+    u_rho=np.multiply(state[u_offset:u_offset+n*(deg+1)],state[rho_offset:rho_offset+n*(deg+1)])
+    f_u_rho=np.multiply(u_rho,np.sqrt(state[f_offset:f_offset+n*(deg+1)]))
+    output=np.matrix(np.zeros((n*(deg+1),1),dtype=float))
+    #Test=1/np.sqrt(state[f_offset:f_offset+n*(deg+1)])+2*math.log10(rough/3.7/D+2.51*mu/D/f_u_rho)
+    Test=(1/np.sqrt(state[f_offset:f_offset+n*(deg+1)])+
+          2*np.log10(rough/3.7/D*np.ones((n*(deg+1),1),dtype=float)
+          +2.51*mu/f_u_rho/D))
+    for i in range(0,n*(deg+1)):
+        output[i]=.01-state[f_offset+i]
+    return Test
+#==============================================================================
+    
+
+    
 def Linspace(x_start,x_end,n):
     #Generates a vector of n linearly spaced points between x_start and x_end
     #Inputs:    x_start=lower bound

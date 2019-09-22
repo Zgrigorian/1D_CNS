@@ -83,6 +83,11 @@ def Fast_Newton_Solve(x0,func,A,*arg):
         #Update x
         #Perform Linesearch
         x=x+p
+        #Ensure non-negative bounds
+        for i in range(0,len(x)):
+            if x[i] <= 0:
+                x[i]=10**-6
+        
         #increment the iteration counter
         count = count +1
         #Print results so I know its working
@@ -132,7 +137,6 @@ def Newton_Solve(x0,func,*arg):
             print("Solving Linear System\n")
             p=Linear_Solve(J,-func(x))
         #Update x
-        #Perform Linesearch
         x=x+p
         #increment the iteration counter
         count = count +1
@@ -403,7 +407,7 @@ def Fast_Jacobian(x0,func,A,*arg):
     #Determine the size of the problem
     n=len(func(x0, *arg))
     m=len(x0)
-    Block=int(m/5)
+    Block=int(m/6)
     #Allocate memory for Jacobian
     J=np.matrix(np.zeros((n,m),dtype=float))
     #Copy x0 for finite differences
@@ -430,16 +434,24 @@ def Fast_Jacobian(x0,func,A,*arg):
             #Calculate derivative
             #J[i,j]=(func(x_up[:,j],*arg)[i]-func(x_low[:,j],*arg)[i])/(2*h)
             J[i,j]=(Func_up_matrix[i,j]-Func_low_matrix[i,j])/(2*h)
+        for j in range(5*Block,6*Block):
+            J[i,j]=(Func_up_matrix[i,j]-Func_low_matrix[i,j])/(2*h)
     #Calculate Temperature
     for i in range(3*Block,4*Block):
         for j in range(3*Block,5*Block):
             #Calculate derivative
             #J[i,j]=(func(x_up[:,j],*arg)[i]-func(x_low[:,j],*arg)[i])/(2*h)
             J[i,j]=(Func_up_matrix[i,j]-Func_low_matrix[i,j])/(2*h)
+    #Calculate Enthalpy Equation
     for i in range(4*Block,5*Block):
-        for j in range(0,5*Block):
+        for j in range(0,6*Block):
             #Calculate derivative
             #J[i,j]=(func(x_up[:,j],*arg)[i]-func(x_low[:,j],*arg)[i])/(2*h)
+            J[i,j]=(Func_up_matrix[i,j]-Func_low_matrix[i,j])/(2*h)
+    #Calculate Friction Equation
+    for i in range(5*Block,6*Block):
+        for j in range(5*Block,6*Block):
+            #Calculate derivative
             J[i,j]=(Func_up_matrix[i,j]-Func_low_matrix[i,j])/(2*h)
     #Return the Jacobian as the output
     return J
